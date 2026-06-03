@@ -1,0 +1,23 @@
+# =============================================================================
+# AI Resume Screener — requirements.txt
+# All Python packages needed to run this application.
+# Install all at once with: pip install -r requirements.txt
+# =============================================================================
+
+# Web framework — turns Python functions into a UI with one command
+streamlit==1.45.1
+
+# Official Anthropic SDK — handles API calls, auth, error types
+anthropic==0.52.0
+
+# Data validation — enforces types and rules on all inputs/outputs
+pydantic==2.11.5
+
+# PDF reading — extracts text from uploaded PDF files
+PyPDF2==3.0.1
+
+# Loads .env file into environment variables automatically
+python-dotenv==1.1.0
+
+# HTTP library (used internally by anthropic SDK, pinned for stability)
+httpx==0.28.1
