@@ -1,0 +1,30 @@
+# =============================================================================
+# AI Resume Screener — docker-compose.yml
+# Lets you run the app locally with Docker using ONE command: docker-compose up
+# docker-compose is the local development companion to Dockerfile.
+# =============================================================================
+
+version: "3.9"
+
+services:
+  app:
+    # Build from the Dockerfile in the current directory
+    build: .
+
+    # Map your laptop's port 8501 → container's port 8501
+    # Visit http://localhost:8501 in your browser to see the app
+    ports:
+      - "8501:8501"
+
+    # Load environment variables from your .env file
+    # This is how ANTHROPIC_API_KEY gets into the container locally
+    env_file:
+      - .env
+
+    # Mount your local code into the container for hot-reloading during dev
+    # Changes you make to files are reflected immediately without rebuilding
+    volumes:
+      - .:/app
+
+    # Restart the container automatically if it crashes (production habit)
+    restart: unless-stopped
