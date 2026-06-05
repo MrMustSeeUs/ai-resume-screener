@@ -1,0 +1,22 @@
+# Virtual environment — never copy into container, it has its own
+venv/
+.venv/
+
+# Git history — not needed in production container
+.git/
+.github/
+
+# Local secrets — injected via --env-file at runtime
+.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Test artifacts
+.pytest_cache/
+tests/
+
+# Editor files
+.vscode/
+.idea/

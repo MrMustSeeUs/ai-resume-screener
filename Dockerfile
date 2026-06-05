@@ -44,7 +44,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 # --server.port=8501        → match the EXPOSE above
 # --server.headless=true    → no browser auto-open in production
 # --server.fileWatcherType=none → disable file watcher (not needed in production)
-CMD ["streamlit", "run", "app/main.py", \
+CMD ["python", "-m", "streamlit", "run", "app/main.py", \
      "--server.address=0.0.0.0", \
      "--server.port=8501", \
      "--server.headless=true", \
