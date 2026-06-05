@@ -10,7 +10,7 @@
 # ── Base image ────────────────────────────────────────────────────────────────
 # We start FROM an official Python 3.11 image (slim = smaller, faster builds)
 # "slim" removes documentation and test files we don't need in production
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # ── Working directory ─────────────────────────────────────────────────────────
 # All subsequent commands run inside /app inside the container
