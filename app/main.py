@@ -2,28 +2,29 @@
 # AI Resume Screener — app/main.py
 # Full Streamlit UI — entry point for the web application.
 #
+# Resume input methods (user chooses one):
+#   1. Upload PDF
+#   2. Upload Word (.docx)
+#   3. Paste resume text directly
+#
 # Layout:
-#   1. Page config + custom CSS styling
-#   2. Header section
-#   3. Two-column input area (PDF upload | Job description)
-#   4. Analyze button
-#   5. Results section (score gauge, matched skills, missing skills, suggestions)
-#   6. Error handling and loading states
+#   1. Page config + custom CSS
+#   2. Header
+#   3. Resume input (tab selector + input area)
+#   4. Job description input
+#   5. Analyze button
+#   6. Results (score, matched skills, missing skills, suggestions)
 # =============================================================================
 
-import streamlit as st          # Web UI framework
-from dotenv import load_dotenv  # Loads .env file into environment variables
+import streamlit as st
+from dotenv import load_dotenv
 
-# Load .env file first — must happen before importing claude_client
-# which reads ANTHROPIC_API_KEY from the environment
 load_dotenv()
 
-# Import our own modules
-from app.pdf_utils import validate_pdf_file, extract_text_from_pdf
+from app.pdf_utils import validate_uploaded_file, extract_text_from_file
 from app.claude_client import screen_resume
 
 # ── Page configuration ────────────────────────────────────────────────────────
-# Must be the first Streamlit call in the script
 st.set_page_config(
     page_title="AI Resume Screener",
     page_icon="📄",
@@ -32,33 +33,23 @@ st.set_page_config(
 )
 
 # ── Custom CSS ────────────────────────────────────────────────────────────────
-# Streamlit allows injecting CSS via st.markdown with unsafe_allow_html=True
-# We use this to override default Streamlit styles and create a polished look
 st.markdown("""
 <style>
-    /* ── Import fonts ── */
     @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap');
 
-    /* ── Global styles ── */
     .stApp {
         background-color: #0f1117;
         color: #e8e8e8;
         font-family: 'DM Sans', sans-serif;
     }
-
-    /* ── Hide Streamlit default header and footer ── */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
-
-    /* ── Main container width ── */
     .block-container {
         max-width: 1100px;
         padding-top: 2rem;
         padding-bottom: 2rem;
     }
-
-    /* ── App header ── */
     .app-header {
         text-align: center;
         padding: 2.5rem 0 2rem 0;
@@ -78,8 +69,6 @@ st.markdown("""
         margin-top: 0.5rem;
         font-weight: 300;
     }
-
-    /* ── Section labels ── */
     .section-label {
         font-size: 0.75rem;
         font-weight: 600;
@@ -88,8 +77,6 @@ st.markdown("""
         color: #6c7293;
         margin-bottom: 0.5rem;
     }
-
-    /* ── Score display ── */
     .score-container {
         background: linear-gradient(135deg, #1a1d2e 0%, #16192a 100%);
         border: 1px solid #2a2d3a;
@@ -117,13 +104,9 @@ st.markdown("""
         line-height: 1.6;
         font-style: italic;
     }
-
-    /* ── Score color tiers ── */
-    .score-high  { color: #4ade80; }   /* green  — 70-100 */
-    .score-mid   { color: #fbbf24; }   /* amber  — 40-69  */
-    .score-low   { color: #f87171; }   /* red    — 0-39   */
-
-    /* ── Skill cards ── */
+    .score-high  { color: #4ade80; }
+    .score-mid   { color: #fbbf24; }
+    .score-low   { color: #f87171; }
     .results-card {
         background: #1a1d2e;
         border: 1px solid #2a2d3a;
@@ -141,13 +124,7 @@ st.markdown("""
     .title-green { color: #4ade80; }
     .title-red   { color: #f87171; }
     .title-blue  { color: #60a5fa; }
-
-    /* ── Skill pill tags ── */
-    .skill-pills {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.5rem;
-    }
+    .skill-pills { display: flex; flex-wrap: wrap; gap: 0.5rem; }
     .pill-green {
         background: rgba(74, 222, 128, 0.1);
         border: 1px solid rgba(74, 222, 128, 0.3);
@@ -164,8 +141,6 @@ st.markdown("""
         border-radius: 20px;
         font-size: 0.85rem;
     }
-
-    /* ── Suggestion items ── */
     .suggestion-item {
         display: flex;
         gap: 0.75rem;
@@ -175,31 +150,10 @@ st.markdown("""
         color: #c0c4d8;
         line-height: 1.5;
     }
-    .suggestion-item:last-child {
-        border-bottom: none;
-    }
-    .suggestion-number {
-        color: #60a5fa;
-        font-weight: 600;
-        min-width: 1.5rem;
-    }
-
-    /* ── Divider ── */
-    .section-divider {
-        border: none;
-        border-top: 1px solid #2a2d3a;
-        margin: 2rem 0;
-    }
-
-    /* ── Empty state ── */
-    .empty-state {
-        text-align: center;
-        padding: 3rem;
-        color: #4a4d62;
-        font-size: 0.9rem;
-    }
-
-    /* ── Analyze button ── */
+    .suggestion-item:last-child { border-bottom: none; }
+    .suggestion-number { color: #60a5fa; font-weight: 600; min-width: 1.5rem; }
+    .section-divider { border: none; border-top: 1px solid #2a2d3a; margin: 2rem 0; }
+    .empty-state { text-align: center; padding: 3rem; color: #4a4d62; font-size: 0.9rem; }
     .stButton > button {
         background: linear-gradient(135deg, #3b5bdb, #5c7cfa);
         color: white;
@@ -211,20 +165,7 @@ st.markdown("""
         font-weight: 500;
         letter-spacing: 0.5px;
         width: 100%;
-        transition: opacity 0.2s;
-        cursor: pointer;
     }
-    .stButton > button:hover {
-        opacity: 0.9;
-    }
-
-    /* ── File uploader ── */
-    .stFileUploader {
-        background: #1a1d2e;
-        border-radius: 12px;
-    }
-
-    /* ── Text area ── */
     .stTextArea textarea {
         background: #1a1d2e;
         border: 1px solid #2a2d3a;
@@ -233,8 +174,6 @@ st.markdown("""
         font-family: 'DM Sans', sans-serif;
         font-size: 0.9rem;
     }
-
-    /* ── Error box ── */
     .error-box {
         background: rgba(248, 113, 113, 0.1);
         border: 1px solid rgba(248, 113, 113, 0.3);
@@ -244,43 +183,58 @@ st.markdown("""
         font-size: 0.9rem;
         margin-top: 1rem;
     }
+    /* ── Tab styling ── */
+    .stTabs [data-baseweb="tab-list"] {
+        background: #1a1d2e;
+        border-radius: 8px;
+        padding: 4px;
+        gap: 4px;
+        border: 1px solid #2a2d3a;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background: transparent;
+        color: #6c7293;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        font-weight: 500;
+    }
+    .stTabs [aria-selected="true"] {
+        background: #2a2d3a;
+        color: #e8e8e8;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 
-# ── Helper: score color class ─────────────────────────────────────────────────
+# ── Helper functions ──────────────────────────────────────────────────────────
+
 def get_score_class(score: int) -> str:
-    """Returns a CSS class name based on the score range."""
+    """Returns CSS class based on score tier: green/amber/red."""
     if score >= 70:
         return "score-high"
     elif score >= 40:
         return "score-mid"
-    else:
-        return "score-low"
+    return "score-low"
 
 
-# ── Helper: render skill pills ────────────────────────────────────────────────
 def render_pills(skills: list[str], pill_class: str) -> str:
-    """Builds an HTML string of skill pill tags."""
+    """Builds HTML pill tags for a list of skills."""
     if not skills:
         return "<span style='color:#4a4d62; font-size:0.85rem;'>None identified</span>"
-    pills = "".join(f'<span class="{pill_class}">{skill}</span>' for skill in skills)
+    pills = "".join(f'<span class="{pill_class}">{s}</span>' for s in skills)
     return f'<div class="skill-pills">{pills}</div>'
 
 
-# ── Helper: render suggestions ────────────────────────────────────────────────
 def render_suggestions(suggestions: list[str]) -> str:
-    """Builds an HTML string of numbered suggestion items."""
+    """Builds numbered HTML suggestion items."""
     if not suggestions:
         return "<span style='color:#4a4d62; font-size:0.85rem;'>No suggestions available</span>"
-    items = "".join(
+    return "".join(
         f'<div class="suggestion-item">'
         f'<span class="suggestion-number">{i+1}.</span>'
-        f'<span>{suggestion}</span>'
-        f'</div>'
-        for i, suggestion in enumerate(suggestions)
+        f'<span>{s}</span></div>'
+        for i, s in enumerate(suggestions)
     )
-    return items
 
 
 # =============================================================================
@@ -291,22 +245,53 @@ def render_suggestions(suggestions: list[str]) -> str:
 st.markdown("""
 <div class="app-header">
     <h1 class="app-title">📄 AI Resume Screener</h1>
-    <p class="app-subtitle">Upload a resume and paste a job description — Claude AI does the rest.</p>
+    <p class="app-subtitle">Upload or paste your resume and a job description — Claude AI does the rest.</p>
 </div>
 """, unsafe_allow_html=True)
 
-# ── Input section: two columns ────────────────────────────────────────────────
-# st.columns([1, 1]) creates two equal-width columns side by side
+# ── Two-column layout: Resume input | Job description ─────────────────────────
 col1, col2 = st.columns([1, 1], gap="large")
 
 with col1:
-    st.markdown('<p class="section-label">Resume PDF</p>', unsafe_allow_html=True)
-    uploaded_file = st.file_uploader(
-        label="Upload resume",          # Required by Streamlit but hidden via CSS
-        type=["pdf"],                   # Only show PDF files in the file picker
-        help="Max 5 MB · Text-based PDFs only (not scanned images)",
-        label_visibility="collapsed"    # Hides the label — we use our own above
-    )
+    st.markdown('<p class="section-label">Resume</p>', unsafe_allow_html=True)
+
+    # Tabs let the user choose their preferred input method
+    # st.tabs() returns a list of tab context managers
+    tab_pdf, tab_docx, tab_paste = st.tabs(["📄 Upload PDF", "📝 Upload Word (.docx)", "✏️ Paste Text"])
+
+    uploaded_file = None
+    pasted_text = ""
+
+    with tab_pdf:
+        uploaded_file_pdf = st.file_uploader(
+            label="Upload PDF resume",
+            type=["pdf"],
+            help="Max 5 MB · Text-based PDFs only",
+            label_visibility="collapsed",
+            key="pdf_uploader"
+        )
+        if uploaded_file_pdf:
+            uploaded_file = uploaded_file_pdf
+
+    with tab_docx:
+        uploaded_file_docx = st.file_uploader(
+            label="Upload Word resume",
+            type=["docx"],
+            help="Max 5 MB · .docx files only",
+            label_visibility="collapsed",
+            key="docx_uploader"
+        )
+        if uploaded_file_docx:
+            uploaded_file = uploaded_file_docx
+
+    with tab_paste:
+        pasted_text = st.text_area(
+            label="Paste resume text",
+            placeholder="Paste your full resume text here...",
+            height=220,
+            label_visibility="collapsed",
+            key="resume_paste"
+        )
 
 with col2:
     st.markdown('<p class="section-label">Job Description</p>', unsafe_allow_html=True)
@@ -314,12 +299,13 @@ with col2:
         label="Job description",
         placeholder="Paste the full job description here...",
         height=220,
-        label_visibility="collapsed"
+        label_visibility="collapsed",
+        key="job_description"
     )
 
 # ── Analyze button ────────────────────────────────────────────────────────────
 st.markdown("<br>", unsafe_allow_html=True)
-_, btn_col, _ = st.columns([2, 1, 2])   # Center the button using empty columns
+_, btn_col, _ = st.columns([2, 1, 2])
 with btn_col:
     analyze_clicked = st.button("Analyze Resume", type="primary")
 
@@ -327,34 +313,48 @@ st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
 
 # ── Results section ───────────────────────────────────────────────────────────
 if analyze_clicked:
-    # ── Input validation before calling Claude ────────────────────────────────
 
-    # Check 1: Was a file uploaded?
-    if not uploaded_file:
-        st.markdown('<div class="error-box">⚠️ Please upload a resume PDF.</div>',
-                    unsafe_allow_html=True)
-        st.stop()   # st.stop() halts execution — nothing below this runs
+    # ── Determine resume text source ─────────────────────────────────────────
+    # Priority: file upload > pasted text
+    # If the user uploaded a file AND pasted text, the file takes precedence.
+    resume_text = ""
 
-    # Check 2: Was a job description provided?
+    if uploaded_file:
+        # Validate the file before reading
+        is_valid, error_msg = validate_uploaded_file(uploaded_file)
+        if not is_valid:
+            st.markdown(f'<div class="error-box">⚠️ {error_msg}</div>',
+                        unsafe_allow_html=True)
+            st.stop()
+
+        # Extract text using the router function (handles PDF and DOCX)
+        with st.spinner("Reading resume..."):
+            resume_text, extract_error = extract_text_from_file(uploaded_file)
+
+        if extract_error:
+            st.markdown(f'<div class="error-box">⚠️ {extract_error}</div>',
+                        unsafe_allow_html=True)
+            st.stop()
+
+    elif pasted_text and len(pasted_text.strip()) >= 50:
+        # Use pasted text directly — no file processing needed
+        resume_text = pasted_text.strip()
+
+    else:
+        # No valid resume input provided
+        st.markdown(
+            '<div class="error-box">⚠️ Please upload a resume (PDF or Word) '
+            'or paste your resume text (minimum 50 characters).</div>',
+            unsafe_allow_html=True
+        )
+        st.stop()
+
+    # ── Validate job description ──────────────────────────────────────────────
     if not job_description or len(job_description.strip()) < 30:
-        st.markdown('<div class="error-box">⚠️ Please paste a job description (at least 30 characters).</div>',
-                    unsafe_allow_html=True)
-        st.stop()
-
-    # Check 3: Validate the PDF file (type, size, not empty)
-    is_valid, error_msg = validate_pdf_file(uploaded_file)
-    if not is_valid:
-        st.markdown(f'<div class="error-box">⚠️ {error_msg}</div>',
-                    unsafe_allow_html=True)
-        st.stop()
-
-    # ── Extract text from PDF ─────────────────────────────────────────────────
-    with st.spinner("Reading resume..."):
-        resume_text, extract_error = extract_text_from_pdf(uploaded_file)
-
-    if extract_error:
-        st.markdown(f'<div class="error-box">⚠️ {extract_error}</div>',
-                    unsafe_allow_html=True)
+        st.markdown(
+            '<div class="error-box">⚠️ Please paste a job description (at least 30 characters).</div>',
+            unsafe_allow_html=True
+        )
         st.stop()
 
     # ── Call Claude API ───────────────────────────────────────────────────────
@@ -362,22 +362,17 @@ if analyze_clicked:
         try:
             result = screen_resume(resume_text, job_description)
         except ValueError as e:
-            # Pydantic validation error — bad input
             st.markdown(f'<div class="error-box">⚠️ Input error: {e}</div>',
                         unsafe_allow_html=True)
             st.stop()
         except RuntimeError as e:
-            # API error or response parsing error
             st.markdown(f'<div class="error-box">⚠️ {e}</div>',
                         unsafe_allow_html=True)
             st.stop()
 
     # ── Render results ────────────────────────────────────────────────────────
-    # Only reached if everything above succeeded
-
     score_class = get_score_class(result.match_score)
 
-    # Row 1: Score + Summary
     st.markdown(f"""
     <div class="score-container">
         <div class="score-label">Match Score</div>
@@ -387,7 +382,6 @@ if analyze_clicked:
     </div>
     """, unsafe_allow_html=True)
 
-    # Row 2: Matched skills | Missing skills
     res_col1, res_col2 = st.columns([1, 1], gap="large")
 
     with res_col1:
@@ -406,7 +400,6 @@ if analyze_clicked:
         </div>
         """, unsafe_allow_html=True)
 
-    # Row 3: Improvement suggestions (full width)
     st.markdown(f"""
     <div class="results-card">
         <div class="results-card-title title-blue">💡 Improvement Suggestions</div>
@@ -415,9 +408,9 @@ if analyze_clicked:
     """, unsafe_allow_html=True)
 
 else:
-    # ── Empty state — shown before the button is clicked ─────────────────────
     st.markdown("""
     <div class="empty-state">
-        Upload a resume and paste a job description above, then click <strong>Analyze Resume</strong>.
+        Upload a resume (PDF or Word), paste your resume text, and add a job description above.<br>
+        Then click <strong>Analyze Resume</strong>.
     </div>
     """, unsafe_allow_html=True)

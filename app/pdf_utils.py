@@ -1,45 +1,50 @@
 # =============================================================================
-# AI Resume Screener — pdf_utils.py
-# Handles reading resume PDFs uploaded by the recruiter.
-# Validates file type and size BEFORE reading, then extracts plain text.
+# AI Resume Screener — app/pdf_utils.py
+# Handles reading resumes from three input methods:
+#   1. PDF upload (PyPDF2)
+#   2. Word (.docx) upload (python-docx)
+#   3. Plain text paste (no file processing needed)
+# Validates file type and size BEFORE reading in all cases.
 # =============================================================================
 
-import PyPDF2                  # Library that reads PDF files in Python
-import io                      # Lets us read file bytes as a stream (no disk write needed)
-import logging                 # Python's built-in logger — we use this instead of print()
+import PyPDF2                  # Reads PDF files
+import docx                    # Reads Word .docx files (python-docx library)
+import io                      # Wraps bytes as a file-like stream
+import logging
 
-# Set up a logger for this module.
-# Best practice: each module gets its own named logger.
-# In production, logs flow to a log aggregator (like Datadog or Render's log viewer).
 logger = logging.getLogger(__name__)
 
-# ── Security constants ──────────────────────────────────────────────────────
-MAX_FILE_SIZE_MB = 5                         # Reject files larger than 5 MB
+# ── Security constants ────────────────────────────────────────────────────────
+MAX_FILE_SIZE_MB = 5
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
-ALLOWED_MIME_TYPE = "application/pdf"        # Only PDFs allowed
-ALLOWED_EXTENSION = ".pdf"
+ALLOWED_EXTENSIONS = {".pdf", ".docx"}
 
 
-def validate_pdf_file(uploaded_file) -> tuple[bool, str]:
+def validate_uploaded_file(uploaded_file) -> tuple[bool, str]:
     """
-    Security gate #1: Validate the uploaded file BEFORE reading it.
-    
+    Security gate: validate any uploaded resume file before reading it.
+    Accepts both .pdf and .docx files.
+
     Returns:
         (True, "") if file is safe to process
         (False, "reason") if file should be rejected
-    
-    Why do this?
-    - File type check: prevents uploading .exe or .sh files renamed to .pdf
-    - Size check: prevents memory exhaustion attacks (uploading a 500 MB file)
+
+    Why validate first?
+    - Extension check: blocks renamed executables (.exe → .pdf)
+    - Size check: prevents memory exhaustion from huge files
+    - Empty check: prevents silent failures downstream
     """
 
-    # Check 1: Does the filename end in .pdf?
     filename: str = uploaded_file.name.lower()
-    if not filename.endswith(ALLOWED_EXTENSION):
-        return False, f"File must be a PDF. Received: {filename}"
+
+    # Check 1: Is the extension allowed?
+    if not any(filename.endswith(ext) for ext in ALLOWED_EXTENSIONS):
+        return False, (
+            f"Unsupported file type: {filename}. "
+            f"Please upload a PDF or Word (.docx) file."
+        )
 
     # Check 2: Is the file under the size limit?
-    # uploaded_file.size is provided by Streamlit in bytes
     file_size = uploaded_file.size
     if file_size > MAX_FILE_SIZE_BYTES:
         size_mb = file_size / (1024 * 1024)
@@ -57,54 +62,43 @@ def validate_pdf_file(uploaded_file) -> tuple[bool, str]:
 
 def extract_text_from_pdf(uploaded_file) -> tuple[str, str]:
     """
-    Extracts all plain text from a PDF file uploaded via Streamlit.
-    
-    Args:
-        uploaded_file: The file object from st.file_uploader()
-    
+    Extracts plain text from an uploaded PDF file.
+
     Returns:
-        (text, "") on success — text is the extracted string
+        (text, "") on success
         ("", error_message) on failure
 
-    How PyPDF2 works:
-        PDF files store content in pages. PyPDF2 opens the PDF,
-        loops through each page, and extracts the text layer.
-        Note: scanned/image PDFs have no text layer — we handle that case.
+    Note: scanned/image PDFs have no text layer and will return an error.
     """
 
     try:
-        # Read all bytes from the uploaded file into memory
-        # io.BytesIO wraps raw bytes so PyPDF2 can read it like a file
         pdf_bytes = uploaded_file.read()
         pdf_stream = io.BytesIO(pdf_bytes)
-
-        # Open the PDF with PyPDF2
         reader = PyPDF2.PdfReader(pdf_stream)
 
-        # Safety check: reject unreasonably long PDFs
+        # Reject unreasonably long documents
         num_pages = len(reader.pages)
         if num_pages > 10:
-            return "", f"Resume PDF has {num_pages} pages. Maximum is 10."
+            return "", f"Resume has {num_pages} pages. Maximum is 10."
 
-        # Extract text from each page and join with a newline
         extracted_pages = []
         for page_num, page in enumerate(reader.pages):
             page_text = page.extract_text()
             if page_text:
                 extracted_pages.append(page_text.strip())
             else:
-                logger.warning(f"Page {page_num + 1} had no extractable text (may be an image).")
+                logger.warning(f"Page {page_num + 1} had no extractable text.")
 
         full_text = "\n\n".join(extracted_pages).strip()
 
-        # If no text at all was extracted, the PDF is likely a scanned image
         if not full_text:
             return "", (
                 "No text could be extracted from this PDF. "
-                "It may be a scanned image. Please upload a text-based PDF."
+                "It may be a scanned image. Please upload a text-based PDF "
+                "or paste your resume text directly."
             )
 
-        logger.info(f"Successfully extracted {len(full_text)} characters from {num_pages} pages.")
+        logger.info(f"PDF: extracted {len(full_text)} characters from {num_pages} pages.")
         return full_text, ""
 
     except PyPDF2.errors.PdfReadError as e:
@@ -112,6 +106,77 @@ def extract_text_from_pdf(uploaded_file) -> tuple[str, str]:
         return "", "The PDF file appears to be corrupted or unreadable."
 
     except Exception as e:
-        # Catch-all: log the full error internally, show a safe message to user
-        logger.error(f"Unexpected error extracting PDF text: {e}", exc_info=True)
+        logger.error(f"Unexpected PDF error: {e}", exc_info=True)
         return "", "An unexpected error occurred while reading the PDF."
+
+
+def extract_text_from_docx(uploaded_file) -> tuple[str, str]:
+    """
+    Extracts plain text from an uploaded Word (.docx) file.
+
+    How python-docx works:
+        A .docx file is a zip archive containing XML. python-docx parses
+        that XML and exposes paragraphs as Python objects. We loop through
+        each paragraph and join their text content.
+
+    Returns:
+        (text, "") on success
+        ("", error_message) on failure
+    """
+
+    try:
+        # Read file bytes into memory and wrap as a stream for python-docx
+        docx_bytes = uploaded_file.read()
+        docx_stream = io.BytesIO(docx_bytes)
+
+        # Open the Word document
+        document = docx.Document(docx_stream)
+
+        # Extract text from every paragraph
+        # A paragraph in Word is any block of text separated by Enter
+        paragraphs = []
+        for para in document.paragraphs:
+            text = para.text.strip()
+            if text:  # Skip empty paragraphs
+                paragraphs.append(text)
+
+        full_text = "\n".join(paragraphs).strip()
+
+        if not full_text:
+            return "", (
+                "No text could be extracted from this Word document. "
+                "Please try a different file or paste your resume text directly."
+            )
+
+        logger.info(f"DOCX: extracted {len(full_text)} characters from {len(paragraphs)} paragraphs.")
+        return full_text, ""
+
+    except Exception as e:
+        logger.error(f"Unexpected DOCX error: {e}", exc_info=True)
+        return "", "An unexpected error occurred while reading the Word document."
+
+
+def extract_text_from_file(uploaded_file) -> tuple[str, str]:
+    """
+    Router function: detects file type and calls the correct extractor.
+
+    This is the single function main.py calls — it doesn't need to know
+    whether the file is PDF or DOCX, it just gets back text or an error.
+
+    Args:
+        uploaded_file: Streamlit file object from st.file_uploader()
+
+    Returns:
+        (text, "") on success
+        ("", error_message) on failure
+    """
+
+    filename = uploaded_file.name.lower()
+
+    if filename.endswith(".pdf"):
+        return extract_text_from_pdf(uploaded_file)
+    elif filename.endswith(".docx"):
+        return extract_text_from_docx(uploaded_file)
+    else:
+        # Should never reach here if validate_uploaded_file() ran first
+        return "", f"Unsupported file type: {filename}"
