@@ -16,6 +16,9 @@ pydantic==2.11.5
 # PDF reading — extracts text from uploaded PDF files
 PyPDF2==3.0.1
 
+# Word document (.docx) reading
+python-docx==1.1.2
+
 # Loads .env file into environment variables automatically
 python-dotenv==1.1.0
 
